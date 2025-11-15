@@ -57,9 +57,25 @@ app.get('/', (req, res) => {
 app.get('/api/health', async (req, res) => {
   try {
     await db.query('SELECT 1')
+
+    const tablesCheck = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('users', 'links')
+    `)
+
+    const tables = tablesCheck.rows.map((r) => r.table_name)
+    const missingTables = ['users', 'links'].filter((t) => !tables.includes(t))
+
     res.json({
       status: 'ok',
       database: 'connected',
+      tables: {
+        users: tables.includes('users'),
+        links: tables.includes('links'),
+        missing: missingTables,
+      },
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
@@ -68,6 +84,7 @@ app.get('/api/health', async (req, res) => {
       database: 'disconnected',
       error: 'Não foi possível conectar ao banco de dados',
       message: error.message,
+      code: error.code,
       timestamp: new Date().toISOString(),
     })
   }
@@ -295,10 +312,26 @@ app.post('/api/links', authenticateToken, async (req, res) => {
         .json({ error: 'Usuário não encontrado. Faça login novamente.' })
     }
 
-    res.status(500).json({
+    const errorResponse = {
       error: 'Erro ao salvar link.',
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
-    })
+    }
+
+    if (err.code === '42P01') {
+      errorResponse.error =
+        'Tabela não encontrada. Execute o script schema.sql no banco de dados.'
+      errorResponse.code = 'TABLE_NOT_FOUND'
+    } else if (err.code === '23503') {
+      errorResponse.error = 'Usuário não encontrado. Faça login novamente.'
+      errorResponse.code = 'FOREIGN_KEY_VIOLATION'
+    } else if (err.code === '23505') {
+      errorResponse.error = 'Link duplicado.'
+      errorResponse.code = 'UNIQUE_VIOLATION'
+    } else if (err.message) {
+      errorResponse.details = err.message
+      errorResponse.code = err.code || 'UNKNOWN_ERROR'
+    }
+
+    res.status(500).json(errorResponse)
   }
 })
 
