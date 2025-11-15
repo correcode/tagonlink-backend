@@ -47,16 +47,38 @@ JWT_SECRET=sua_chave_secreta_aqui
 npm run test-db
 ```
 
-## Criar Tabelas no Banco
+## Criar/Corrigir Tabelas no Banco
 
-Execute o script SQL `schema.sql` no painel do Neon:
+### Opção 1: Se a tabela `links` já existe mas falta a coluna `user_id`
+
+Execute o script `fix-schema.sql` no SQL Editor do Neon:
+
+```sql
+ALTER TABLE links ADD COLUMN IF NOT EXISTS user_id INTEGER;
+
+ALTER TABLE links
+  ADD CONSTRAINT IF NOT EXISTS links_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_links_user_id ON links(user_id);
+```
+
+### Opção 2: Recriar todas as tabelas (apaga dados existentes)
+
+⚠️ **ATENÇÃO**: Isso vai apagar todos os dados existentes!
+
+Execute o script `recreate-tables.sql` no SQL Editor do Neon.
+
+### Opção 3: Criar tabelas do zero
+
+Execute o script `schema.sql` no SQL Editor do Neon.
+
+**Como executar:**
 
 1. Acesse o Neon Dashboard
 2. Vá em **SQL Editor**
-3. Cole o conteúdo de `schema.sql`
+3. Cole o conteúdo do script escolhido
 4. Execute
-
-Ou use o script de teste que verifica se as tabelas existem.
 
 ## Verificar se Está Funcionando
 
