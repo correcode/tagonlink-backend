@@ -17,7 +17,6 @@ const pool = new Pool({
     : { rejectUnauthorized: false },
 })
 
-// Testar conexão ao inicializar
 pool.on('error', (err) => {
   console.error('❌ Erro inesperado no pool do PostgreSQL:', err)
 })

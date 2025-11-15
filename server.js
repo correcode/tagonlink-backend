@@ -7,9 +7,8 @@ const { generateToken, authenticateToken } = require('./auth')
 
 const app = express()
 
-// Função para verificar origem permitida
 const isAllowedOrigin = (origin) => {
-  if (!origin) return true // Permitir requisições sem origin (Postman, etc)
+  if (!origin) return true
 
   const allowedPatterns = [
     /^https:\/\/.*\.vercel\.app$/,
@@ -27,9 +26,7 @@ app.use(
       if (isAllowedOrigin(origin)) {
         callback(null, true)
       } else {
-        callback(null, true) // Permitir todas as origens em desenvolvimento
-        // Em produção, você pode querer ser mais restritivo:
-        // callback(new Error('Not allowed by CORS'))
+        callback(null, true)
       }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -57,10 +54,8 @@ app.get('/', (req, res) => {
   })
 })
 
-// Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
-    // Testar conexão com banco
     await db.query('SELECT 1')
     res.json({
       status: 'ok',
@@ -78,9 +73,6 @@ app.get('/api/health', async (req, res) => {
   }
 })
 
-// ========== AUTENTICAÇÃO ==========
-
-// Registro de usuário
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, name } = req.body
 
@@ -97,7 +89,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   try {
-    // Verificar se usuário já existe
     const existingUser = await db.query(
       'SELECT id FROM users WHERE email = $1',
       [email]
@@ -106,10 +97,8 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Email já cadastrado.' })
     }
 
-    // Hash da senha
     const hashedPassword = await bcrypt.hash(password, 10)
 
-    // Criar usuário
     const result = await db.query(
       'INSERT INTO users (email, password, name) VALUES ($1, $2, $3) RETURNING id, email, name',
       [email, hashedPassword, name]
@@ -128,7 +117,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 })
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body
 
@@ -162,7 +150,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 })
 
-// Reset de senha - solicitar
 app.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body
 
@@ -175,17 +162,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       email,
     ])
     if (result.rows.length === 0) {
-      // Por segurança, não revelar se o email existe ou não
       return res.json({
         message: 'Se o email existir, um link de recuperação será enviado.',
       })
     }
 
-    // Gerar token de reset (simplificado - em produção usar token único e expiração)
     const resetToken = generateToken(result.rows[0].id)
 
-    // Em produção, enviar email com link de reset
-    // Por enquanto, retornamos o token (em produção, não fazer isso)
     res.json({ message: 'Link de recuperação enviado para seu email.' })
   } catch (err) {
     console.error(err)
@@ -193,7 +176,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 })
 
-// Reset de senha - confirmar
 app.post('/api/auth/reset-password', async (req, res) => {
   const { token, newPassword } = req.body
 
@@ -230,7 +212,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 })
 
-// Verificar token
 app.get('/api/auth/verify', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(
@@ -247,9 +228,11 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
   }
 })
 
-// ========== LINKS (protegidos) ==========
-
 app.get('/api/links', authenticateToken, async (req, res) => {
+  if (!req.userId) {
+    return res.status(401).json({ error: 'Usuário não autenticado.' })
+  }
+
   try {
     const result = await db.query(
       'SELECT * FROM links WHERE user_id = $1 ORDER BY created_at DESC',
@@ -257,26 +240,65 @@ app.get('/api/links', authenticateToken, async (req, res) => {
     )
     res.json(result.rows)
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Erro ao buscar links.' })
+    console.error('Erro ao buscar links:', err)
+    console.error('Detalhes:', {
+      message: err.message,
+      code: err.code,
+      userId: req.userId,
+    })
+    res.status(500).json({
+      error: 'Erro ao buscar links.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
   }
 })
 
 app.post('/api/links', authenticateToken, async (req, res) => {
   const { title, url, description = '', tags = '' } = req.body
-  if (!title || !url)
+
+  if (!title || !url) {
     return res.status(400).json({ error: 'Título e URL são obrigatórios.' })
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' })
+  }
+
+  if (!isValidUrl(url)) {
+    return res.status(400).json({ error: 'URL inválida.' })
+  }
+
+  if (!req.userId) {
+    return res.status(401).json({ error: 'Usuário não autenticado.' })
+  }
 
   try {
     const result = await db.query(
       'INSERT INTO links (title, url, description, tags, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [title, url, description, tags, req.userId]
+      [title, url, description || null, tags || null, req.userId]
     )
+
+    if (result.rows.length === 0) {
+      return res.status(500).json({ error: 'Link não foi criado.' })
+    }
+
     res.status(201).json(result.rows[0])
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Erro ao salvar link.' })
+    console.error('Erro ao salvar link:', err)
+    console.error('Detalhes:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      userId: req.userId,
+      data: { title, url, description, tags },
+    })
+
+    if (err.code === '23503') {
+      return res
+        .status(400)
+        .json({ error: 'Usuário não encontrado. Faça login novamente.' })
+    }
+
+    res.status(500).json({
+      error: 'Erro ao salvar link.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
   }
 })
 
@@ -288,7 +310,6 @@ app.put('/api/links/:id', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Título e URL são obrigatórios.' })
 
   try {
-    // Verificar se o link pertence ao usuário
     const checkResult = await db.query(
       'SELECT user_id FROM links WHERE id = $1',
       [id]
@@ -329,7 +350,6 @@ app.delete('/api/links/:id', authenticateToken, async (req, res) => {
   }
 })
 
-// Configuração para Vercel
 if (process.env.VERCEL) {
   module.exports = app
 } else {
