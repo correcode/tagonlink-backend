@@ -7,17 +7,32 @@ const { generateToken, authenticateToken } = require('./auth')
 
 const app = express()
 
-const allowedOrigins = [
-  'https://tagonlink-frontend.vercel.app',
-  'http://localhost:3000',
-  'http://127.0.0.1:5500',
-  'http://localhost:5500',
-]
+// Função para verificar origem permitida
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true // Permitir requisições sem origin (Postman, etc)
+
+  const allowedPatterns = [
+    /^https:\/\/.*\.vercel\.app$/,
+    /^https:\/\/.*\.vercel\.app\/.*$/,
+    /^http:\/\/localhost:\d+$/,
+    /^http:\/\/127\.0\.0\.1:\d+$/,
+  ]
+
+  return allowedPatterns.some((pattern) => pattern.test(origin))
+}
 
 app.use(
   cors({
-    origin: allowedOrigins,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true)
+      } else {
+        callback(null, true) // Permitir todas as origens em desenvolvimento
+        // Em produção, você pode querer ser mais restritivo:
+        // callback(new Error('Not allowed by CORS'))
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   })
@@ -34,9 +49,34 @@ function isValidUrl(str) {
   }
 }
 
-app.get('/', (req, res) =>
-  res.send('✅ Backend TAGONLINK rodando com sucesso!')
-)
+app.get('/', (req, res) => {
+  res.json({
+    message: '✅ Backend TAGONLINK rodando com sucesso!',
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  })
+})
+
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    // Testar conexão com banco
+    await db.query('SELECT 1')
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      database: 'disconnected',
+      error: 'Não foi possível conectar ao banco de dados',
+      message: error.message,
+      timestamp: new Date().toISOString(),
+    })
+  }
+})
 
 // ========== AUTENTICAÇÃO ==========
 
